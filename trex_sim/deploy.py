@@ -17,7 +17,7 @@ TREX_DOWNLOAD_URL = f"https://trex-tgn.cisco.com/trex/release/v{TREX_VERSION}.ta
 DEPS = [
     "python3", "python3-pip", "python3-zmq",
     "pciutils", "kmod", "iproute2", "ethtool",
-    "wget", "tar", "net-tools",
+    "wget", "curl", "ca-certificates", "tar", "net-tools",
 ]
 
 
@@ -42,20 +42,75 @@ def install_deps(ssh: SSHClient):
     D.success("依赖安装完成")
 
 
+def _is_valid_tarball(ssh: SSHClient, tarball: str) -> bool:
+    """非空且为合法 gzip（拦截 SSL 代理返回的 HTML 错误页等情况）。"""
+    code, _, _ = ssh.exec(f"test -s {tarball} && gzip -t {tarball}")
+    return code == 0
+
+
+def _fetch_trex_archive(ssh: SSHClient, tarball: str):
+    """按 安全wget → 更新CA重试 → 跳过校验wget → curl 的阶梯尝试下载。"""
+    url = TREX_DOWNLOAD_URL
+    errors = []
+
+    # 1) 标准 wget（校验证书）
+    code, _, err = ssh.exec(f"rm -f {tarball}; wget --no-verbose --tries=2 --timeout=20 -O {tarball} {url}", timeout=600)
+    if code == 0 and _is_valid_tarball(ssh, tarball):
+        D.success("TRex 下载完成（证书已校验）")
+        return
+    errors.append(f"wget(校验): exit={code} {err.strip()}")
+
+    # 证书校验失败（exit 5）：尝试更新 CA 证书后重试
+    if code == 5:
+        D.warn("证书校验失败——尝试更新 CA 证书后重试…")
+        ssh.exec("DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates && update-ca-certificates", timeout=180)
+        code, _, err = ssh.exec(f"rm -f {tarball}; wget --no-verbose --tries=2 --timeout=20 -O {tarball} {url}", timeout=600)
+        if code == 0 and _is_valid_tarball(ssh, tarball):
+            D.success("更新 CA 证书后下载成功")
+            return
+        errors.append(f"wget(更新CA后): exit={code} {err.strip()}")
+
+    # 2) 跳过证书校验（应对 SSL 中间代理）
+    D.warn("回退到跳过证书校验下载（--no-check-certificate）…")
+    code, _, err = ssh.exec(f"rm -f {tarball}; wget --no-verbose --tries=2 --timeout=20 --no-check-certificate -O {tarball} {url}", timeout=600)
+    if code == 0 and _is_valid_tarball(ssh, tarball):
+        D.warn("已下载（未校验证书，注意 SSL 中间代理风险）")
+        return
+    errors.append(f"wget(跳过校验): exit={code} {err.strip()}")
+
+    # 3) curl 兜底
+    code, _, err = ssh.exec(f"rm -f {tarball}; curl -fSLk --connect-timeout 20 --max-time 600 --retry 1 -o {tarball} {url}", timeout=600)
+    if code == 0 and _is_valid_tarball(ssh, tarball):
+        D.warn("已通过 curl 下载（未校验证书）")
+        return
+    errors.append(f"curl: exit={code} {err.strip()}")
+
+    ssh.exec(f"rm -f {tarball}")
+    detail = "\n    ".join(errors)
+    raise RuntimeError(
+        "TRex 下载失败（已尝试校验/更新CA/跳过校验/curl）。\n"
+        f"  最可能是网络被限制或 SSL 代理拦截。请在有外网的机器下载后，scp 到客户端再重跑：\n"
+        f"    下载: {url}\n"
+        f"    放到客户端: {tarball}\n"
+        f"  各步错误:\n    {detail}"
+    )
+
+
 def download_trex(ssh: SSHClient):
     D.info(f"下载 TRex v{TREX_VERSION}（约 300 MB，请稍候）…")
     _run(ssh, f"mkdir -p {TREX_DIR}", "创建目录")
     tarball = f"/tmp/trex-{TREX_VERSION}.tar.gz"
-    code, _, _ = ssh.exec(f"test -f {tarball}")
-    if code != 0:
-        _run(
-            ssh,
-            f"wget -q --show-progress -O {tarball} {TREX_DOWNLOAD_URL}",
-            "下载 TRex",
-            timeout=600,
-        )
+
+    if _is_valid_tarball(ssh, tarball):
+        D.success(f"发现已预置的安装包 {tarball}，跳过下载")
+    else:
+        _fetch_trex_archive(ssh, tarball)
+
     D.info("解压 TRex…")
-    _run(ssh, f"tar -xzf {tarball} -C {TREX_DIR}", "解压", timeout=120)
+    code, _, err = ssh.exec(f"tar -xzf {tarball} -C {TREX_DIR}", timeout=120)
+    if code != 0:
+        ssh.exec(f"rm -f {tarball}")  # 损坏包：删掉以便下次重新下载
+        raise RuntimeError(f"解压失败（安装包可能损坏，已删除）: {err.strip()}")
     _run(ssh, f"mv {TREX_DIR}/v{TREX_VERSION} {TREX_INSTALL_DIR} 2>/dev/null || true", "重命名目录")
     D.success("TRex 下载并解压完成")
 

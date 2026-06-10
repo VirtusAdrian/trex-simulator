@@ -76,10 +76,14 @@ def _trex_info(ssh: SSHClient) -> tuple[str, str]:
 
 
 def _network_info(ssh: SSHClient) -> tuple[str, str]:
-    code, _, _ = ssh.exec("timeout 8 wget -q --spider https://trex-tgn.cisco.com 2>/dev/null")
+    # 先按校验证书探测；失败再按跳过校验探测，以区分“不可达”与“证书校验失败”
+    code, _, _ = ssh.exec("wget -q --tries=1 --timeout=8 --spider https://trex-tgn.cisco.com 2>/dev/null")
     if code == 0:
-        return PASS, "可访问 trex-tgn.cisco.com（支持在线下载）"
-    return WARN, "无法访问 trex-tgn.cisco.com（需预置离线包于 /tmp）"
+        return PASS, "可访问 trex-tgn.cisco.com（证书校验通过，支持在线下载）"
+    code2, _, _ = ssh.exec("wget -q --tries=1 --timeout=8 --no-check-certificate --spider https://trex-tgn.cisco.com 2>/dev/null")
+    if code2 == 0:
+        return WARN, "可达但证书校验失败（部署时将自动跳过校验下载，或预置离线包）"
+    return WARN, "无法访问 trex-tgn.cisco.com（需预置离线包于 /tmp/trex-3.03.tar.gz）"
 
 
 _SYMBOL = {PASS: ("✔", D.GREEN), WARN: ("⚠", D.YELLOW), FAIL: ("✘", D.RED)}

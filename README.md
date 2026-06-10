@@ -135,6 +135,23 @@ trex-sim run -H 10.0.0.5 -u ubuntu -p secret
 trex-sim run -H 10.0.0.5 -u ubuntu -k ~/.ssh/id_ed25519 --sudo-password secret
 ```
 
+## 故障排查
+
+### 下载 TRex 失败（`wget exit=5` SSL 证书校验失败）
+
+常见于有 SSL 中间代理或 CA 证书过期的环境。工具会**自动按阶梯重试**：校验下载 → 更新 CA 证书重试 → `--no-check-certificate` 跳过校验 → `curl` 兜底，并校验下载包是否为合法 gzip（拦截代理返回的 HTML 错误页）。多数情况无需干预即可通过。
+
+若全部失败（网络被完全限制），**预置离线包**即可绕过下载：在有外网的机器下载，scp 到客户端的固定路径，再重跑（工具检测到合法安装包会自动跳过下载）：
+
+```bash
+# 任意有外网的机器
+wget --no-check-certificate -O trex-3.03.tar.gz https://trex-tgn.cisco.com/trex/release/v3.03.tar.gz
+scp trex-3.03.tar.gz ubuntu@<客户端>:/tmp/trex-3.03.tar.gz
+# 然后重跑 trex-sim run / deploy
+```
+
+> 若上一次失败残留了空的/损坏的 `/tmp/trex-3.03.tar.gz`，新版会自动识别并重下；旧版可先 `rm -f /tmp/trex-3.03.tar.gz` 再重跑。
+
 ## 项目结构
 
 ```
