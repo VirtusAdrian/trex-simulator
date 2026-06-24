@@ -80,3 +80,12 @@ grp = sp.build_cells("group", [64])
 assert len(grp) == 2 and len(grp[0].streams) == 2
 assert {s.tx for s in grp[0].streams} == {0, 1}  # 组1 = card1 两口 TX
 print("CELLS_OK", len(seq), len(grp))
+
+script = sp.render_stl_runner_script(
+    cells=sp.build_cells("seq", [64, 1500]),
+    dest_macs=["bb:00", "bb:01", "aa:00", "aa:01"],
+    trex_dir="/opt/trex/3.03", rate_percent=100, duration=20)
+compile(script, "<stl>", "exec")          # 必须是合法 Python
+assert "STLClient" in script and "flow_stats" in script
+assert "TREX_CELL:" in script and '"size": 64' in script
+print("STL_SCRIPT_OK len", len(script))
