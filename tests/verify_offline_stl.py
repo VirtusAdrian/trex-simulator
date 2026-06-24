@@ -127,3 +127,18 @@ assert restore.needs_rebind(["mlx5_core", "mlx5_core", "mlx5_core", "mlx5_core"]
 # Intel：需要 rebind
 assert restore.needs_rebind(["ice", "ice", "mlx5_core", "ice"]) is True
 print("RESTORE_OK")
+
+class _DrySSH(_FakeSSH):
+    def __init__(self, table): super().__init__(table); self.uploaded = {}
+    def put_privileged(self, content, path): self.uploaded[path] = content
+    def put_content(self, content, path): self.uploaded[path] = content
+
+tbl = _mk_table()
+tbl["lscpu -p"] = LSCPU
+dry = _DrySSH(tbl)
+res = sr.run_4dir(dry, names=topo.NIC_NAMES_DEFAULT, mode="seq", sizes=[64],
+                  duration=10, rate_percent=100, loss_thresh=0.1,
+                  cores_per_socket=2, trex_dir="/opt/trex/3.03", dry_run=True)
+assert "/etc/trex_cfg.yaml" in dry.uploaded and "port_limit: 4" in dry.uploaded["/etc/trex_cfg.yaml"]
+assert res["cells"] == 4 and res["dry_run"] is True
+print("RUN4DIR_DRY_OK")
