@@ -43,3 +43,16 @@ assert [p.numa for p in ports] == [0, 0, 1, 1]
 assert [p.driver for p in ports] == ["mlx5_core"] * 4
 assert topo.dest_macs(ports) == ["bb:00", "bb:01", "aa:00", "aa:01"]
 print("DETECT_PORTS_OK")
+
+from trex_sim import deploy
+assert deploy.pick_cores([2, 4, 6, 8, 10], 3) == [2, 4, 6]
+cfg = deploy.render_trex_cfg_4port(
+    pcis=["0000:41:00.0", "0000:41:00.1", "0000:a1:00.0", "0000:a1:00.1"],
+    dp_sock0=[2, 4, 6, 8], dp_sock1=[34, 36, 38, 40],
+    master_id=0, latency_id=1)
+assert "port_limit: 4" in cfg
+assert "0000:41:00.0" in cfg and "0000:a1:00.1" in cfg
+assert "master_thread_id: 0" in cfg and "latency_thread_id: 1" in cfg
+assert "socket: 0" in cfg and "socket: 1" in cfg
+assert "threads: [2, 4, 6, 8]" in cfg and "threads: [34, 36, 38, 40]" in cfg
+print("CFG4_OK len", len(cfg))
