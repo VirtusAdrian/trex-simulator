@@ -25,6 +25,7 @@ print("CPS_EST_OK target=100Gbps ->", max(est, 1000), "cps")
 class FakeSSH:
     def __init__(self): self.written = {}
     def put_content(self, content, path): self.written[path] = content
+    def put_privileged(self, content, path): self.written[path] = content
 cfg_ssh = FakeSSH()
 deploy.write_trex_config(cfg_ssh, ["0000:01:00.0", "0000:02:00.0"], cores=16)
 cfg = cfg_ssh.written["/etc/trex_cfg.yaml"]
