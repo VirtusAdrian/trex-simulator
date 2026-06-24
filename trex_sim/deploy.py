@@ -2,7 +2,7 @@
 TRex auto-deployment to a remote Ubuntu client via SSH.
 
 Installs TRex under /opt/trex, configures DPDK interfaces,
-and starts the TRex daemon in ASTF (stateful TCP) mode.
+and supports both 2-port ASTF and 4-port Stateless (STL) line-rate testing.
 """
 
 import json
@@ -237,3 +237,92 @@ def deploy(ssh: SSHClient, interfaces: list[str], cores: int = 4):
 
     D.success(f"TRex 部署完成！安装路径: {TREX_INSTALL_DIR}")
     return TREX_INSTALL_DIR
+
+
+# Mellanox(mlx5) 用 bifurcated 驱动，不绑 vfio；TRex 需 rdma-core/ibverbs
+MLX_DEPS = ["rdma-core", "ibverbs-providers", "libibverbs1"]
+
+
+def parse_phys_cores_by_socket(lscpu_p: str) -> dict:
+    """解析 `lscpu -p=CPU,CORE,SOCKET` → {socket: [物理核的首个逻辑核, ...]}。
+    每个物理 core 只取第一次出现的逻辑 CPU，跳过 SMT 兄弟核。"""
+    seen_core = set()
+    by_sock: dict = {}
+    for line in lscpu_p.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(",")
+        if len(parts) < 3:
+            continue
+        try:
+            cpu, core, sock = int(parts[0]), int(parts[1]), int(parts[2])
+        except ValueError:
+            continue
+        if core in seen_core:
+            continue
+        seen_core.add(core)
+        by_sock.setdefault(sock, []).append(cpu)
+    for s in by_sock:
+        by_sock[s].sort()
+    return by_sock
+
+
+def detect_socket_phys_cores(ssh) -> dict:
+    code, out, _ = ssh.exec("lscpu -p=CPU,CORE,SOCKET")
+    if code != 0:
+        raise RuntimeError("lscpu 不可用，无法确定 NUMA 物理核拓扑")
+    return parse_phys_cores_by_socket(out)
+
+
+def write_trex_config_4port(ssh, pcis: list, dp_sock0: list, dp_sock1: list,
+                            master_id: int = 0, latency_id: int = 1):
+    cfg = render_trex_cfg_4port(pcis, dp_sock0, dp_sock1, master_id, latency_id)
+    ssh.put_privileged(cfg, "/etc/trex_cfg.yaml")
+    D.success("4 口 TRex 配置已写入 /etc/trex_cfg.yaml")
+
+
+def pick_cores(phys_cores: list, count: int) -> list:
+    """从本 socket 物理核列表取前 count 个（已排除 master/latency 与 SMT 兄弟核）。"""
+    return list(phys_cores[:count])
+
+
+def render_trex_cfg_4port(pcis: list, dp_sock0: list, dp_sock1: list,
+                          master_id: int = 0, latency_id: int = 1) -> str:
+    """生成 4 口 / 双 socket 的 trex_cfg.yaml（STL，mlx5 原地，无 vfio）。"""
+    if len(pcis) != 4:
+        raise ValueError("需要恰好 4 个 PCI 地址")
+    iface_lines = "\n".join(f"        - '{p}'" for p in pcis)
+    t0 = ", ".join(str(c) for c in dp_sock0)
+    t1 = ", ".join(str(c) for c in dp_sock1)
+    return f"""### TRex 配置 (自动生成) — 4 口 STL 线速 / 双 NUMA
+- port_limit: 4
+  version: 2
+  interfaces:
+{iface_lines}
+  port_info:
+    - ip: 1.1.1.1
+      default_gw: 1.1.1.2
+    - ip: 2.2.2.2
+      default_gw: 2.2.2.1
+    - ip: 3.3.3.3
+      default_gw: 3.3.3.2
+    - ip: 4.4.4.4
+      default_gw: 4.4.4.3
+  memory:
+    mbuf_64:    32767
+    mbuf_128:   32767
+    mbuf_256:   16383
+    mbuf_512:   16383
+    mbuf_1024:  16383
+    mbuf_2048:  16383
+    mbuf_9k:    16383
+  platform:
+    master_thread_id: {master_id}
+    latency_thread_id: {latency_id}
+    dual_if:
+      - socket: 0
+        threads: [{t0}]
+      - socket: 1
+        threads: [{t1}]
+"""
