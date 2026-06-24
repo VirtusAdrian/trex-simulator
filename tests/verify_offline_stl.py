@@ -13,3 +13,33 @@ ports = [topo.PortInfo(n, f"pci{i}", i % 2, f"mac{i}", "mlx5_core")
          for i, n in enumerate(topo.NIC_NAMES_DEFAULT)]
 assert topo.dest_macs(ports) == ["mac2", "mac3", "mac0", "mac1"]
 print("TOPO_OK", topo.NIC_NAMES_DEFAULT)
+
+# detect_ports：用 FakeSSH 回放 ethtool / sysfs 输出
+class _FakeSSH:
+    def __init__(self, table): self.table = table
+    def exec(self, cmd, timeout=60, raw=False):
+        for key, out in self.table.items():
+            if key in cmd:
+                return 0, out, ""
+        return 1, "", "no match"
+
+def _mk_table():
+    t = {}
+    pci = {"enp65s0f0np0": "0000:41:00.0", "enp65s0f1np1": "0000:41:00.1",
+           "enp161s0f0np0": "0000:a1:00.0", "enp161s0f1np1": "0000:a1:00.1"}
+    numa = {"enp65s0f0np0": "0", "enp65s0f1np1": "0",
+            "enp161s0f0np0": "1", "enp161s0f1np1": "1"}
+    mac = {"enp65s0f0np0": "aa:00", "enp65s0f1np1": "aa:01",
+           "enp161s0f0np0": "bb:00", "enp161s0f1np1": "bb:01"}
+    for n in topo.NIC_NAMES_DEFAULT:
+        t[f"ethtool -i {n}"] = f"driver: mlx5_core\nbus-info: {pci[n]}\n"
+        t[f"/sys/class/net/{n}/device/numa_node"] = numa[n] + "\n"
+        t[f"/sys/class/net/{n}/address"] = mac[n] + "\n"
+    return t
+
+ports = topo.detect_ports(_FakeSSH(_mk_table()), topo.NIC_NAMES_DEFAULT)
+assert [p.pci for p in ports] == ["0000:41:00.0", "0000:41:00.1", "0000:a1:00.0", "0000:a1:00.1"]
+assert [p.numa for p in ports] == [0, 0, 1, 1]
+assert [p.driver for p in ports] == ["mlx5_core"] * 4
+assert topo.dest_macs(ports) == ["bb:00", "bb:01", "aa:00", "aa:01"]
+print("DETECT_PORTS_OK")

@@ -32,3 +32,33 @@ class PortInfo:
 def dest_macs(ports: list) -> list:
     """每个 TX 口的目的 MAC = 其对端口的 MAC。"""
     return [ports[peer_index(i)].mac for i in range(len(ports))]
+
+
+def _one(ssh, cmd) -> str:
+    code, out, _ = ssh.exec(cmd)
+    return out.strip() if code == 0 else ""
+
+
+def detect_ports(ssh, names: list) -> list:
+    """按给定（已 NUMA 对齐）顺序读取每口 PCI/NUMA/MAC/驱动。"""
+    ports = []
+    for n in names:
+        info = _one(ssh, f"ethtool -i {n}")
+        pci = driver = ""
+        for line in info.splitlines():
+            if line.startswith("bus-info:"):
+                pci = line.split(":", 1)[1].strip()
+            elif line.startswith("driver:"):
+                driver = line.split(":", 1)[1].strip()
+        numa_s = _one(ssh, f"cat /sys/class/net/{n}/device/numa_node")
+        mac = _one(ssh, f"cat /sys/class/net/{n}/address")
+        try:
+            numa = int(numa_s)
+        except ValueError:
+            numa = -1
+        if not pci or not mac:
+            raise RuntimeError(f"网卡 {n} 探测不全（pci='{pci}' mac='{mac}'）；请确认 4 口存在")
+        ports.append(PortInfo(name=n, pci=pci, numa=numa, mac=mac, driver=driver))
+    if len(ports) != 4:
+        raise RuntimeError(f"需要恰好 4 个网口，实得 {len(ports)}")
+    return ports
