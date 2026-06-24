@@ -2,7 +2,7 @@
 TRex auto-deployment to a remote Ubuntu client via SSH.
 
 Installs TRex under /opt/trex, configures DPDK interfaces,
-and starts the TRex daemon in ASTF (stateful TCP) mode.
+and supports both 2-port ASTF and 4-port Stateless (STL) line-rate testing.
 """
 
 import json

@@ -5,6 +5,8 @@ Commands:
   probe    -- Check whether a remote client meets TRex prerequisites
   deploy   -- Install TRex on a remote Ubuntu client
   run      -- Deploy (if needed) and run a TCP ASTF test
+  run-4dir -- Stateless 4-port line-rate test (per-size loss/latency)
+  restore  -- Stop TRex and restore NICs to kernel (mlx5 no-op)
   status   -- Check TRex daemon status on a remote client
 """
 
@@ -27,7 +29,8 @@ from . import restore as restore_mod
 _ssh_opts = [
     click.option("--host", "-H", default=None, help="客户端 IP 地址或主机名（留空则启动前交互输入）"),
     click.option("--user", "-u", default=None, help="SSH 用户名（留空则启动前交互输入）"),
-    click.option("--password", "-p", default=None, help="SSH 密码（留空且未用 --key 时交互输入）"),
+    click.option("--password", "-p", default=None, envvar="TREXSIM_PASSWORD",
+                 help="SSH 密码（留空且未用 --key 时交互输入；也可经 TREXSIM_PASSWORD 环境变量传入）"),
     click.option("--key", "-k", default=None, help="SSH 私钥文件路径"),
     click.option("--port", default=22, show_default=True, help="SSH 端口"),
     click.option("--sudo-password", default=None,

@@ -42,9 +42,10 @@ def _m(pps):  # pps -> Mpps 字符串
     return f"{pps / 1e6:.2f}"
 
 
-def summarize(judged: list) -> tuple:
+def summarize(judged: list, link_gbps: int = 100, rate_percent: int = 100) -> tuple:
     rows = []
     overall = "PASS"
+    target = f"{link_gbps * rate_percent / 100:.0f}"
     for cell in judged:
         for s in cell["streams"]:
             if s["verdict"] != "PASS":
@@ -52,6 +53,8 @@ def summarize(judged: list) -> tuple:
             rows.append({
                 "包长": str(cell["size"]),
                 "方向": str(s["dir"]),
+                "目标Gbps": target,
+                "发送Gbps": _g(s.get("tx_bps", 0.0)),
                 "接收Gbps": _g(s.get("rx_bps", 0.0)),
                 "Mpps": _m(s.get("rx_pps", 0.0)),
                 "丢包%": str(s.get("loss_pct", 0.0)),
@@ -88,6 +91,11 @@ def run_4dir(ssh, names, mode, sizes, duration, rate_percent, loss_thresh,
     if dry_run:
         return {"cells": len(cells), "dry_run": True, "ports": [p.name for p in ports]}
 
+    if not dp0 or not dp1:
+        raise RuntimeError(f"NUMA 物理核不足：socket0={dp0} socket1={dp1}（每 socket 需 >=1 个可用物理核）")
+    if len(dp0) < cores_per_socket or len(dp1) < cores_per_socket:
+        D.warn(f"可用物理核少于请求：socket0={len(dp0)} socket1={len(dp1)} < {cores_per_socket}（TRex 可能起不来或欠配）")
+
     D.step("启动 TRex STL 守护进程")
     ssh.exec("pkill -f 't-rex-64' 2>/dev/null || true")
     ssh.exec(f"cd {trex_dir} && ./t-rex-64 -i --no-scapy-server -c {cores_per_socket} "
@@ -110,6 +118,9 @@ def run_4dir(ssh, names, mode, sizes, duration, rate_percent, loss_thresh,
             for s in jc["streams"]:
                 D.info(f"{jc['label']} dir{s['dir']}: rx={_g(s.get('rx_bps', 0))}Gbps "
                        f"loss={s['loss_pct']}% -> {s['verdict']}")
+            if jc["streams"] and all(s.get("tx_pkts", 0) == 0 for s in jc["streams"]):
+                D.warn(f"{jc['label']}: tx_pkts 全为 0 —— 若所有单元均如此，请核对 TRex 版本 get_stats() 是否携带 pg_id 统计"
+                       f"（必要时改用 get_pgid_stats）、网线对连(0↔2,1↔3) 与 dest MAC。")
         elif line.strip():
             D.stream_line(line)
 
@@ -119,5 +130,5 @@ def run_4dir(ssh, names, mode, sizes, duration, rate_percent, loss_thresh,
     D.step("还原（停 TRex；mlx5 无需 rebind）")
     restore_mod.restore_ports(ssh, ports)
 
-    rows, overall = summarize(judged)
+    rows, overall = summarize(judged, rate_percent=rate_percent)
     return {"cells": len(cells), "dry_run": False, "rows": rows, "overall": overall}

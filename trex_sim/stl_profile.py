@@ -28,6 +28,8 @@ def build_cells(mode: str, sizes: list) -> list:
     cells = []
     pg = 1
     for size in sizes:
+        if size < 64:
+            raise ValueError(f"包长 {size} 小于以太网最小帧 64B，不支持")
         if mode == "seq":
             for num, (tx, rx) in DIR_BY_NUM.items():
                 cells.append(Cell(f"dir{num}-{size}B", size, [Stream(num, tx, rx, pg)]))
@@ -67,7 +69,14 @@ def make_pkt(dst_mac, size):
     return STLPktBuilder(pkt=base / ("x" * pad))
 
 c = STLClient(server="127.0.0.1")
-c.connect()
+for _try in range(15):
+    try:
+        c.connect()
+        break
+    except Exception:
+        time.sleep(1)
+else:
+    c.connect()
 try:
     all_ports = c.get_all_ports()
     c.reset(ports=all_ports)

@@ -186,8 +186,9 @@ run_on_host() {
     # trex：调用本机 trex-sim run-4dir（自身 SSH 部署/打流/还原）
     local to="$OUT_DIR/${sn}_${ts}_trex.log"
     log "$ip：trex-sim run-4dir → $to"
-    trex-sim run-4dir -H "$ip" -u "$USERNAME" -p "$PASSWORD" \
-      --duration 20 --mode seq 2>&1 | tee "$to"
+    TREXSIM_PASSWORD="$PASSWORD" trex-sim run-4dir -H "$ip" -u "$USERNAME" \
+      --mode "${TREX_MODE:-seq}" --sizes "${TREX_SIZES:-64,128,512,1500,9000}" \
+      --duration "${TREX_DURATION:-20}" --cores-per-socket "${TREX_CORES:-16}" 2>&1 | tee "$to"
     local rc=${PIPESTATUS[0]}
     outfile="$to"
   fi
