@@ -67,3 +67,16 @@ phys = deploy.parse_phys_cores_by_socket(LSCPU)
 assert phys[0] == [0, 1] and phys[1] == [32, 33]
 assert "rdma-core" in deploy.MLX_DEPS
 print("SOCKCORES_OK", phys)
+
+from trex_sim import stl_profile as sp
+assert round(sp.line_rate_pps(64)) == 148809524  # 100G@64B ≈ 148.81 Mpps
+seq = sp.build_cells("seq", [64, 1500])
+assert len(seq) == 8  # 4 方向 × 2 包长
+assert seq[0].streams[0].dir_num == 1 and seq[0].streams[0].tx == 0 and seq[0].streams[0].rx == 2
+assert all(len(c.streams) == 1 for c in seq)
+pgs = [s.pg_id for c in seq for s in c.streams]
+assert len(pgs) == len(set(pgs))  # pg_id 唯一
+grp = sp.build_cells("group", [64])
+assert len(grp) == 2 and len(grp[0].streams) == 2
+assert {s.tx for s in grp[0].streams} == {0, 1}  # 组1 = card1 两口 TX
+print("CELLS_OK", len(seq), len(grp))
