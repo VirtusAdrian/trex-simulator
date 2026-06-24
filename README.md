@@ -73,6 +73,23 @@ trex-sim status -H 192.168.1.50 -u ubuntu -p secret
 
 > `probe` / `deploy` / `status` 同样支持留空交互输入与 `-k` 私钥登录。
 
+### 4. STL 4 口线速测试（run-4dir）
+
+对固定 4 口 / 2 对拓扑（`enp65s0f0np0`↔`enp161s0f0np0`、`enp65s0f1np1`↔`enp161s0f1np1`）做 **Stateless 线速**打流，按包长扫描测 **线速 / 丢包 / 时延**，作为 iperf3（内核 TCP goodput）的补充：
+
+```bash
+trex-sim run-4dir -H <ip> -u <user> -p <pass> \
+  --mode seq --sizes 64,128,512,1500,9000 --duration 20 \
+  --cores-per-socket 16 --loss-thresh 0.1
+```
+
+- `--mode seq|group`：逐方向（方向1-4）/ 分组（组1=方向1+3、组2=方向2+4）并发。
+- `--sizes`：包长扫描（小包 64/128B 最压 NIC/PCIe/CPU 的 pps 上限）。
+- `--cores-per-socket`：每 socket DP 物理核数（被测机专用、无 CPU 预留时可调大，7H12 建议 16–32）。
+- 判定：目标速率下**丢包率 ≤ `--loss-thresh`%** 为 PASS；退出码 全 PASS=0、有 FAIL=2。
+- **Mellanox(mlx5)** 网卡用 bifurcated 驱动留在内核，跑完无需 rebind；`trex-sim restore` 可手动还原（Intel/vfio 场景）。
+- 端口按 NUMA 对齐：`card1`(bus65)=node0、`card2`(bus161)=node1，组1 让 card1 全 TX、card2 全 RX。
+
 ## 关键参数（run）
 
 | 参数 | 说明 | 默认 |
