@@ -147,3 +147,5 @@ from trex_sim import cli as _cli
 cmds = _cli.cli.commands.keys()
 assert "run-4dir" in cmds and "restore" in cmds
 print("CLI_OK", sorted(cmds))
+
+print("ALL_OFFLINE_STL_CHECKS_PASSED")
