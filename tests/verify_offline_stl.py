@@ -120,3 +120,10 @@ assert overall == "FAIL" and len(rows) == 2
 assert rows[0]["方向"] == "1" and rows[0]["丢包%"] == "0.0"
 display.stl_table(rows)   # 不抛异常即可
 print("SUMMARY_OK", overall)
+
+from trex_sim import restore
+# mlx5：无需 rebind（bifurcated，留在内核）
+assert restore.needs_rebind(["mlx5_core", "mlx5_core", "mlx5_core", "mlx5_core"]) is False
+# Intel：需要 rebind
+assert restore.needs_rebind(["ice", "ice", "mlx5_core", "ice"]) is True
+print("RESTORE_OK")
