@@ -142,3 +142,8 @@ res = sr.run_4dir(dry, names=topo.NIC_NAMES_DEFAULT, mode="seq", sizes=[64],
 assert "/etc/trex_cfg.yaml" in dry.uploaded and "port_limit: 4" in dry.uploaded["/etc/trex_cfg.yaml"]
 assert res["cells"] == 4 and res["dry_run"] is True
 print("RUN4DIR_DRY_OK")
+
+from trex_sim import cli as _cli
+cmds = _cli.cli.commands.keys()
+assert "run-4dir" in cmds and "restore" in cmds
+print("CLI_OK", sorted(cmds))

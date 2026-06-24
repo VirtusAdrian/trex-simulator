@@ -17,6 +17,8 @@ from . import deploy as dep
 from . import runner as run_mod
 from . import probe as probe_mod
 from . import display as D
+from . import stl_runner, topo
+from . import restore as restore_mod
 
 
 # ──────────────────────────────────────────────
@@ -222,6 +224,72 @@ def run(host, user, password, key, port, sudo_password,
         if "--debug" in sys.argv:
             traceback.print_exc()
         sys.exit(1)
+    finally:
+        ssh.disconnect()
+
+
+@cli.command(name="run-4dir")
+@add_opts(_ssh_opts)
+@click.option("--ifaces-names", default=",".join(topo.NIC_NAMES_DEFAULT), show_default=True,
+              help="4 个内核网卡名（NUMA 对齐顺序，逗号分隔）")
+@click.option("--sizes", default="64,128,512,1500,9000", show_default=True, help="包长扫描（逗号分隔）")
+@click.option("--mode", type=click.Choice(["seq", "group"]), default="seq", show_default=True)
+@click.option("--duration", "-d", default=20, show_default=True, help="每个测量单元时长(秒)")
+@click.option("--rate-percent", default=100, show_default=True, help="发送速率占线速百分比")
+@click.option("--loss-thresh", default=0.1, show_default=True, help="丢包率判定阈值(%)")
+@click.option("--cores-per-socket", default=16, show_default=True, help="每 socket DP 核数(专用机可调大)")
+@click.option("--skip-deploy", is_flag=True, default=False)
+def run_4dir(host, user, password, key, port, sudo_password,
+             ifaces_names, sizes, mode, duration, rate_percent, loss_thresh,
+             cores_per_socket, skip_deploy):
+    """STL 4 口线速测试（方向/分组 × 包长，测线速/丢包/时延）。"""
+    host, user, password, key = resolve_ssh_inputs(host, user, password, key)
+    names = [s.strip() for s in ifaces_names.split(",") if s.strip()]
+    size_list = [int(s) for s in sizes.split(",") if s.strip()]
+    D.header(f"TRex STL 4 口测试  →  {user}@{host}:{port}")
+    ssh = make_ssh(host, user, password, key, port)
+    try:
+        connect_and_escalate(ssh, password, sudo_password)
+        if not skip_deploy:
+            dep.install_deps(ssh)
+            for pkg in dep.MLX_DEPS:
+                ssh.exec(f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq {pkg} || true")
+            if not dep.check_installed(ssh):
+                dep.download_trex(ssh)
+        res = stl_runner.run_4dir(
+            ssh, names=names, mode=mode, sizes=size_list, duration=duration,
+            rate_percent=rate_percent, loss_thresh=loss_thresh,
+            cores_per_socket=cores_per_socket, trex_dir=dep.TREX_INSTALL_DIR)
+        D.header(f"STL 结果汇总  模式={mode}  阈值={loss_thresh}% 丢包")
+        D.stl_table(res.get("rows", []))
+        D.success(f"总体结果: {res.get('overall', 'N/A')}")
+        sys.exit(0 if res.get("overall") == "PASS" else 2)
+    except SystemExit:
+        raise
+    except Exception as e:
+        D.error(str(e))
+        if "--debug" in sys.argv:
+            traceback.print_exc()
+        sys.exit(1)
+    finally:
+        ssh.disconnect()
+
+
+@cli.command()
+@add_opts(_ssh_opts)
+@click.option("--ifaces-names", default=",".join(topo.NIC_NAMES_DEFAULT))
+def restore(host, user, password, key, port, sudo_password, ifaces_names):
+    """停 TRex 并把 4 口还原回内核（Mellanox 为空操作）。"""
+    host, user, password, key = resolve_ssh_inputs(host, user, password, key)
+    names = [s.strip() for s in ifaces_names.split(",") if s.strip()]
+    ssh = make_ssh(host, user, password, key, port)
+    try:
+        connect_and_escalate(ssh, password, sudo_password)
+        ports = topo.detect_ports(ssh, names)
+        restore_mod.restore_ports(ssh, ports)
+        D.success("还原完成")
+    except Exception as e:
+        D.error(str(e)); sys.exit(1)
     finally:
         ssh.disconnect()
 
