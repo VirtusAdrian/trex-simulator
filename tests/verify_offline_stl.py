@@ -56,3 +56,14 @@ assert "master_thread_id: 0" in cfg and "latency_thread_id: 1" in cfg
 assert "socket: 0" in cfg and "socket: 1" in cfg
 assert "threads: [2, 4, 6, 8]" in cfg and "threads: [34, 36, 38, 40]" in cfg
 print("CFG4_OK len", len(cfg))
+
+# 解析 lscpu -p 的 socket->物理核 映射（每物理核取一个逻辑核）
+LSCPU = ("# CPU,Core,Socket\n"
+         "0,0,0\n64,0,0\n"   # core0 socket0 (+SMT sibling 64)
+         "1,1,0\n65,1,0\n"
+         "32,32,1\n96,32,1\n"
+         "33,33,1\n97,33,1\n")
+phys = deploy.parse_phys_cores_by_socket(LSCPU)
+assert phys[0] == [0, 1] and phys[1] == [32, 33]
+assert "rdma-core" in deploy.MLX_DEPS
+print("SOCKCORES_OK", phys)
