@@ -105,3 +105,18 @@ assert judged["verdict"] == "PASS" and judged["streams"][0]["loss_pct"] == 0.0
 bad = dict(cell); bad["streams"] = [dict(cell["streams"][0], rx_pkts=900)]
 assert sr.judge_cell(bad, loss_thresh=0.1)["verdict"] == "FAIL"
 print("JUDGE_OK")
+
+from trex_sim import display
+judged = [
+    {"label": "dir1-64B", "size": 64, "verdict": "PASS", "streams": [
+        {"dir": 1, "loss_pct": 0.0, "rx_bps": 9.9e10, "rx_pps": 1.4e8,
+         "lat_avg": 5.0, "lat_max": 40.0, "verdict": "PASS"}]},
+    {"label": "dir2-64B", "size": 64, "verdict": "FAIL", "streams": [
+        {"dir": 2, "loss_pct": 3.2, "rx_bps": 9.5e10, "rx_pps": 1.3e8,
+         "lat_avg": 6.0, "lat_max": 90.0, "verdict": "FAIL"}]},
+]
+rows, overall = sr.summarize(judged)
+assert overall == "FAIL" and len(rows) == 2
+assert rows[0]["方向"] == "1" and rows[0]["丢包%"] == "0.0"
+display.stl_table(rows)   # 不抛异常即可
+print("SUMMARY_OK", overall)

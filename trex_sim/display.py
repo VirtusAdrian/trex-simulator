@@ -49,3 +49,19 @@ def result_table(stats: dict):
     for key, value in stats.items():
         print(f"  {CYAN}{key:<28}{RESET} {BOLD}{value}{RESET}")
     print(f"{BOLD}{'─' * width}{RESET}\n")
+
+
+def stl_table(rows: list):
+    """打印 STL 结果矩阵（rows = summarize() 的行 dict 列表）。"""
+    if not rows:
+        print("  (无结果)")
+        return
+    cols = list(rows[0].keys())
+    widths = {c: max(len(c), *(len(str(r[c])) for r in rows)) for c in cols}
+    header = "  ".join(f"{c:<{widths[c]}}" for c in cols)
+    print(f"\n{BOLD}{header}{RESET}")
+    print("─" * len(header))
+    for r in rows:
+        line = "  ".join(f"{str(r[c]):<{widths[c]}}" for c in cols)
+        color = GREEN if r.get("判定") == "PASS" else RED
+        print(f"{color}{line}{RESET}")

@@ -29,3 +29,32 @@ def judge_cell(cell: dict, loss_thresh: float) -> dict:
         streams.append({**s, "loss_pct": lp, "verdict": "PASS" if ok else "FAIL"})
     return {"label": cell.get("label", ""), "size": cell.get("size", 0),
             "streams": streams, "verdict": verdict}
+
+
+def _g(bps):  # bps -> Gbps 字符串
+    return f"{bps / 1e9:.2f}"
+
+
+def _m(pps):  # pps -> Mpps 字符串
+    return f"{pps / 1e6:.2f}"
+
+
+def summarize(judged: list) -> tuple:
+    rows = []
+    overall = "PASS"
+    for cell in judged:
+        for s in cell["streams"]:
+            if s["verdict"] != "PASS":
+                overall = "FAIL"
+            rows.append({
+                "包长": str(cell["size"]),
+                "方向": str(s["dir"]),
+                "接收Gbps": _g(s.get("rx_bps", 0.0)),
+                "Mpps": _m(s.get("rx_pps", 0.0)),
+                "丢包%": str(s.get("loss_pct", 0.0)),
+                "时延us(平均/最大)": f"{s.get('lat_avg', 0.0):.1f}/{s.get('lat_max', 0.0):.1f}",
+                "判定": s["verdict"],
+            })
+    if not rows:
+        overall = "FAIL"
+    return rows, overall
