@@ -89,3 +89,19 @@ compile(script, "<stl>", "exec")          # 必须是合法 Python
 assert "STLClient" in script and "flow_stats" in script
 assert "TREX_CELL:" in script and '"size": 64' in script
 print("STL_SCRIPT_OK len", len(script))
+
+from trex_sim import stl_runner as sr
+assert sr.loss_pct(1000, 1000) == 0.0
+assert sr.loss_pct(1000, 999) == 0.1
+assert sr.loss_pct(0, 0) == 100.0
+cell = sr.parse_cell_line('TREX_CELL:{"label":"dir1-64B","size":64,"streams":'
+                          '[{"dir":1,"pg":1,"tx_pkts":1000,"rx_pkts":1000,'
+                          '"tx_bps":9.9e10,"rx_bps":9.9e10,"tx_pps":1.4e8,"rx_pps":1.4e8,'
+                          '"lat_avg":5.0,"lat_max":40.0,"lat_jitter":1.0}]}')
+assert cell["size"] == 64
+assert sr.parse_cell_line("noise") is None
+judged = sr.judge_cell(cell, loss_thresh=0.1)
+assert judged["verdict"] == "PASS" and judged["streams"][0]["loss_pct"] == 0.0
+bad = dict(cell); bad["streams"] = [dict(cell["streams"][0], rx_pkts=900)]
+assert sr.judge_cell(bad, loss_thresh=0.1)["verdict"] == "FAIL"
+print("JUDGE_OK")
