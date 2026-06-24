@@ -91,13 +91,13 @@ iperf 与 trex **一次只跑一个 backend**；mlx5 网卡始终在内核，切
 - `--duration` / `-d`：每个"测量单元"（方向/分组 × 包长）时长，默认 `20`。
 - `--rate-percent`：发送速率占线速百分比，默认 `100`。
 - `--loss-thresh`：丢包率判定阈值（%），默认 `0.1`。
-- `--cores-per-socket`：每 socket DP 核数，默认 `8`（小包 100G 建议 ≥8）。
+- `--cores-per-socket`：每 socket DP 核数，默认 `16`（被测机为专用测试机、CPU 无预留，可大胆调大）。7H12 每 socket 64 物理核，小包线速建议 `16–32`；取各 socket 本地物理核，避开 master(0)/latency(1) 与 SMT 兄弟核，确保测的是 NIC/PCIe 上限而非核数不足。
 - `--skip-deploy`：跳过部署。
 
 ### 5.2 配置生成（`trex_cfg.yaml`，4 口 + 双 socket）
 扩展 `deploy.write_trex_config` 或新增 `write_trex_config_4port`：
 - `port_limit: 4`、`interfaces:` 按 NUMA 对齐顺序填 4 个 PCI。
-- `platform.dual_if`：两条，`{socket:0, threads:[node0 本地核...]}` 与 `{socket:1, threads:[node1 本地核...]}`；核取自各 socket 的 `/sys` cpulist，避开 master/latency 线程。
+- `platform.dual_if`：两条，`{socket:0, threads:[node0 本地核...]}` 与 `{socket:1, threads:[node1 本地核...]}`；每 socket 取 `--cores-per-socket` 个本地**物理核**（从各 socket 的 `/sys` cpulist 选，避开 master(0)/latency(1) 与 SMT 兄弟核）。被测机专用、无预留，可放心多分配。
 - mlx5：**不写 vfio 绑定**；TRex 自动用 mlx5 PMD。Mellanox 需 hugepages + rdma-core/ibverbs。
 - `memory` 段沿用现有大 mbuf；STL 不需要 ASTF 的 dp_flows，可精简。
 
@@ -148,7 +148,7 @@ iperf 与 trex **一次只跑一个 backend**；mlx5 网卡始终在内核，切
 | duration | 20s | 每测量单元 |
 | rate-percent | 100 | 发送占线速比例 |
 | loss-thresh | 0.1% | 判定阈值 |
-| cores-per-socket | 8 | DP 核/每 socket |
+| cores-per-socket | 16 | DP 核/每 socket（专用机可调至 32+，绑本地物理核） |
 | 输出 | iperf_4dir_100G/<SN>_<日期>_trex.log | 与 iperf 同目录 |
 
 ## 9. 错误处理
@@ -168,6 +168,7 @@ iperf 与 trex **一次只跑一个 backend**；mlx5 网卡始终在内核，切
 
 ## 11. 假设与待定
 
+- 被测机为专用测试机、CPU 无预留限制 → DP 核可大胆分配（默认每 socket 16，可调至 32+），仅受物理核数与 NUMA 本地性约束。
 - 假设 4 口内核名固定且 NUMA 映射为 card1=node0、card2=node1（运行时实测确认；不符则按实测 PCI/NUMA 重排 `interfaces`）。
 - 假设 TRex 3.03 的 mlx5 PMD 在靶机 OFED/rdma-core 下可用（probe 验证；如需 MLNX_OFED 另行处理）。
 - 时延采集先用单流 `STLFlowLatencyStats`；若高速下 latency 流影响吞吐，再拆 bulk+latency 双流（待定）。
