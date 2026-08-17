@@ -148,4 +148,26 @@ cmds = _cli.cli.commands.keys()
 assert "run-4dir" in cmds and "restore" in cmds
 print("CLI_OK", sorted(cmds))
 
+# 安全闸：带 IP / 管理口应被拒
+class _IPSSH(_FakeSSH):
+    def __init__(self, mgmt="", ip_ifaces=()):
+        super().__init__({}); self.mgmt = mgmt; self.ip_ifaces = set(ip_ifaces)
+    def exec(self, cmd, timeout=60, raw=False):
+        if "ip route show default" in cmd:
+            return (0, f"default via 1.1.1.1 dev {self.mgmt}\n", "") if self.mgmt else (0, "", "")
+        if "ip -4 -o addr show dev" in cmd:
+            n = cmd.split("dev", 1)[1].strip().split()[0]
+            return (0, f"2: {n}    inet 10.0.0.9/24 scope global {n}\n", "") if n in self.ip_ifaces else (0, "", "")
+        return super().exec(cmd, timeout, raw)
+
+_safe_ports = topo.detect_ports(_FakeSSH(_mk_table()), topo.NIC_NAMES_DEFAULT)
+topo.assert_ports_safe(_IPSSH(), _safe_ports)            # 全干净 -> 通过
+for _bad in (_IPSSH(ip_ifaces={"enp65s0f0np0"}), _IPSSH(mgmt="enp161s0f1np1")):
+    try:
+        topo.assert_ports_safe(_bad, _safe_ports)
+        raise SystemExit("PORTS_SAFE_FAIL: 未拒绝带 IP/管理口")
+    except RuntimeError:
+        pass
+print("PORTS_SAFE_OK")
+
 print("ALL_OFFLINE_STL_CHECKS_PASSED")
