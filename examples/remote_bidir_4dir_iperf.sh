@@ -93,7 +93,8 @@ read_parallel() {
 get_sn() {
   local ip="$1" sn
   sn="$(rsudo "$ip" "dmidecode -s baseboard-serial-number" 2>/dev/null \
-        | tr -d '\r' | grep -vi 'try again\|^\[sudo' | tail -n1 | tr -cd 'A-Za-z0-9_.-')"
+        | tr -d '\r' | grep -vi 'try again\|^\[sudo' | tail -n1 | tr -cd 'A-Za-z0-9_.-' \
+        | sed 's/^[._-]*//; s/[._-]*$//')"
   [[ -z "$sn" ]] && sn="UNKNOWNSN"
   echo "$sn"
 }

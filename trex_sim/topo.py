@@ -62,3 +62,39 @@ def detect_ports(ssh, names: list) -> list:
     if len(ports) != 4:
         raise RuntimeError(f"需要恰好 4 个网口，实得 {len(ports)}")
     return ports
+
+
+def iface_ipv4(ssh, name: str) -> str:
+    """返回该网口的首个 IPv4/掩码；无则空串。"""
+    code, out, _ = ssh.exec(f"ip -4 -o addr show dev {name}")
+    if code != 0:
+        return ""
+    for line in out.splitlines():
+        parts = line.split()
+        for i, tok in enumerate(parts):
+            if tok == "inet" and i + 1 < len(parts):
+                return parts[i + 1]
+    return ""
+
+
+def default_route_iface(ssh) -> str:
+    """返回默认路由(管理口)网卡名；取不到则空串。"""
+    code, out, _ = ssh.exec("ip route show default")
+    if code != 0:
+        return ""
+    for line in out.splitlines():
+        parts = line.split()
+        if "dev" in parts:
+            return parts[parts.index("dev") + 1]
+    return ""
+
+
+def assert_ports_safe(ssh, ports):
+    """拒绝对带 IP 或是管理口的网卡做 DPDK 打流（会影响设备可达）。"""
+    mgmt = default_route_iface(ssh)
+    for p in ports:
+        if p.name == mgmt:
+            raise RuntimeError(f"网口 {p.name} 是默认路由(管理口)，用它做 DPDK 打流会断开设备可达；请检查对连关系。")
+        ip4 = iface_ipv4(ssh, p.name)
+        if ip4:
+            raise RuntimeError(f"网口 {p.name} 带有 IP {ip4}；用它做 DPDK 打流可能影响可达，请先清掉该口 IP 或确认对连关系。")

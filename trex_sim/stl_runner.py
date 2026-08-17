@@ -1,5 +1,6 @@
 """STL 4 口测试编排：解析、判定、汇总、运行。"""
 import json
+import time
 from typing import Optional
 from . import topo, deploy, display as D
 from . import restore as restore_mod
@@ -77,6 +78,9 @@ def run_4dir(ssh, names, mode, sizes, duration, rate_percent, loss_thresh,
         D.info(f"{p.name}  pci={p.pci}  numa={p.numa}  drv={p.driver}")
     dmacs = topo.dest_macs(ports)
 
+    # 安全闸：拒绝带 IP / 管理口的网卡做 DPDK 打流（防止断开设备可达）
+    topo.assert_ports_safe(ssh, ports)
+
     D.step("生成 4 口 / 双 socket 配置")
     phys = deploy.detect_socket_phys_cores(ssh)
     dp0 = deploy.pick_cores([c for c in phys.get(0, []) if c not in (0, 1)], cores_per_socket)
@@ -96,39 +100,46 @@ def run_4dir(ssh, names, mode, sizes, duration, rate_percent, loss_thresh,
     if len(dp0) < cores_per_socket or len(dp1) < cores_per_socket:
         D.warn(f"可用物理核少于请求：socket0={len(dp0)} socket1={len(dp1)} < {cores_per_socket}（TRex 可能起不来或欠配）")
 
-    D.step("启动 TRex STL 守护进程")
-    ssh.exec("pkill -f 't-rex-64' 2>/dev/null || true")
-    ssh.exec(f"cd {trex_dir} && ./t-rex-64 -i --no-scapy-server -c {cores_per_socket} "
-             f"--cfg /etc/trex_cfg.yaml > /tmp/trex_daemon.log 2>&1 &")
-    import time as _t
-    _t.sleep(8)
-    code, _, _ = ssh.exec("pgrep -f 't-rex-64'")
-    if code != 0:
-        _, log, _ = ssh.exec("tail -20 /tmp/trex_daemon.log")
-        raise RuntimeError(f"TRex 启动失败:\n{log}")
-
-    D.step(f"执行 STL 线速测试（{mode}，包长 {sizes}，每单元 {duration}s）")
     judged = []
+    try:
+        D.step("启动 TRex STL 守护进程")
+        ssh.exec("pkill -f 't-rex-64' 2>/dev/null || true")
+        ssh.exec(f"cd {trex_dir} && ./t-rex-64 -i --no-scapy-server -c {cores_per_socket} "
+                 f"--cfg /etc/trex_cfg.yaml > /tmp/trex_daemon.log 2>&1 &")
+        time.sleep(8)
+        code, _, _ = ssh.exec("pgrep -f 't-rex-64'")
+        if code != 0:
+            _, log, _ = ssh.exec("tail -30 /tmp/trex_daemon.log")
+            raise RuntimeError(f"TRex 启动失败:\n{log}")
 
-    def on_line(line):
-        cell = parse_cell_line(line)
-        if cell is not None:
-            jc = judge_cell(cell, loss_thresh)
-            judged.append(jc)
-            for s in jc["streams"]:
-                D.info(f"{jc['label']} dir{s['dir']}: rx={_g(s.get('rx_bps', 0))}Gbps "
-                       f"loss={s['loss_pct']}% -> {s['verdict']}")
-            if jc["streams"] and all(s.get("tx_pkts", 0) == 0 for s in jc["streams"]):
-                D.warn(f"{jc['label']}: tx_pkts 全为 0 —— 若所有单元均如此，请核对 TRex 版本 get_stats() 是否携带 pg_id 统计"
-                       f"（必要时改用 get_pgid_stats）、网线对连(0↔2,1↔3) 与 dest MAC。")
-        elif line.strip():
-            D.stream_line(line)
+        D.step(f"执行 STL 线速测试（{mode}，包长 {sizes}，每单元 {duration}s）")
 
-    ssh.exec_stream(f"python3 {REMOTE_STL_SCRIPT}", on_line=on_line,
-                    timeout=len(cells) * (duration + 40) + 120)
+        def on_line(line):
+            cell = parse_cell_line(line)
+            if cell is not None:
+                jc = judge_cell(cell, loss_thresh)
+                judged.append(jc)
+                for s in jc["streams"]:
+                    D.info(f"{jc['label']} dir{s['dir']}: rx={_g(s.get('rx_bps', 0))}Gbps "
+                           f"loss={s['loss_pct']}% -> {s['verdict']}")
+                if jc["streams"] and all(s.get("tx_pkts", 0) == 0 for s in jc["streams"]):
+                    D.warn(f"{jc['label']}: tx_pkts 全为 0 —— 若所有单元均如此，请核对 TRex 版本 get_stats() 是否携带 pg_id 统计"
+                           f"（必要时改用 get_pgid_stats）、网线对连(0↔2,1↔3) 与 dest MAC。")
+            elif line.strip():
+                D.stream_line(line)
 
-    D.step("还原（停 TRex；mlx5 无需 rebind）")
-    restore_mod.restore_ports(ssh, ports)
+        # 2>&1 合并远端脚本 stderr，避免 traceback 被吞
+        ssh.exec_stream(f"python3 {REMOTE_STL_SCRIPT} 2>&1", on_line=on_line,
+                        timeout=len(cells) * (duration + 40) + 120)
+
+        if not judged:
+            _, log, _ = ssh.exec("tail -40 /tmp/trex_daemon.log")
+            D.warn("未采集到任何测量单元；TRex 守护日志末尾：")
+            for ln in log.splitlines():
+                D.stream_line(ln)
+    finally:
+        D.step("还原（停 TRex；非 mlx5 口 rebind）")
+        restore_mod.restore_ports(ssh, ports)
 
     rows, overall = summarize(judged, rate_percent=rate_percent)
     return {"cells": len(cells), "dry_run": False, "rows": rows, "overall": overall}

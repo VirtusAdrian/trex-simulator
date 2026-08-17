@@ -136,6 +136,10 @@ def detect_interfaces(ssh: SSHClient) -> list[dict]:
             continue
         if link.get("link_type") != "ether":
             continue
+        # 跳过已配 IP 的网口（很可能是管理/业务口，绑 DPDK 会断可达）
+        _, ip_out, _ = ssh.exec(f"ip -4 -o addr show dev {name}")
+        if ip_out.strip():
+            continue
         # Get PCI address
         _, pci_out, _ = ssh.exec(f"ethtool -i {name} 2>/dev/null | grep bus-info | awk '{{print $2}}'")
         pci = pci_out.strip()
